@@ -90,11 +90,13 @@ class P2PEncryptedChatApp:
 
     
     def send_framed(self, sock, data: bytes):
+        """Send bytes with a 4-byte big-endian length prefix."""
         # Prefix with 4-byte length, then the data
         length = len(data).to_bytes(4, byteorder='big')
         sock.sendall(length + data)
 
     def recv_framed(self, sock) :
+        """Receive a length-prefixed message from a socket."""
         # Read exactly 4 bytes for the length
         raw_len = self._recv_exact(sock, 4)
         if not raw_len:
@@ -104,6 +106,7 @@ class P2PEncryptedChatApp:
         return self._recv_exact(sock, length)
 
     def _recv_exact(self, sock, n) :
+        """Read exactly n bytes from a socket or return None on disconnect."""
         data = b""
         while len(data) < n:
             chunk = sock.recv(n - len(data))
@@ -535,6 +538,7 @@ if __name__ == "__main__":
     )       
 
     def signal_handler(sig, frame):
+        """Handle Ctrl+C by unregistering the peer before exiting."""
         print("\nExiting...")
         app.unregister()
         sys.exit(0)

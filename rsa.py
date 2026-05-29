@@ -14,6 +14,7 @@ SMALL_PRIMES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29,
 class RSA:
     
     def __init__(self, bits=1024, e=65537, miller_rabin_rounds=40): # standard public exponent (e)
+        """Generate RSA key parameters and derive matching public/private exponents."""
         self._bits = bits
         self._p = None
         self._q = None
@@ -36,6 +37,7 @@ class RSA:
             
         
     def _is_gcd_1(self, a, b):
+        """Return True when two integers are coprime (gcd equals 1)."""
         a, b = a, b
         while b != 0:
             a, b = b, a % b # Euclidean algorithm where a becomes divisor and b becomes reminder till b (reminder) becomes 0 
@@ -45,6 +47,7 @@ class RSA:
     
     
     def _nBitRandom(self): 
+        """Generate a cryptographically secure random number with configured bit length."""
   
         return(random.SystemRandom().randrange(2**(self._bits-1)+1, 2**self._bits-1))
      

@@ -11,6 +11,7 @@ from aes import AES
 
 class Peer:
     def __init__(self, username, port, encoder,debug):
+        """Initialize peer state, cryptographic helpers, and key material."""
         self.username = username
         self.port = port
         self.public_key = None
@@ -31,11 +32,13 @@ class Peer:
     
         
     def init_aes(self, session_key: bytes):
+        """Initialize the AES helper instance with a provided session key."""
         if self.debug:
             print(f"Initializing AES with session key: {Encoder.represent_bytes_in_hex(session_key)}")
         self.aes = AES(session_key)
         
     def encrypt_message(self, plaintext: bytes,session_key: bytes,iv: bytes) -> bytes:
+        """Encrypt plaintext bytes with AES-CBC using the given key and IV."""
         if self.debug:
             print(f"Encrypting message (hex) {self.encoder.decode(plaintext)} with session key: {Encoder.represent_bytes_in_hex(session_key)}")   
         self.aes = AES(session_key)
@@ -46,6 +49,7 @@ class Peer:
 
     
     def decrypt_message(self, ciphertext: bytes, session_key: bytes, iv: bytes):
+        """Decrypt AES-CBC ciphertext bytes using the provided key and IV."""
         if self.debug:
             print(f"Decrypting message (hex) {Encoder.represent_bytes_in_hex(ciphertext)} with session key: {Encoder.represent_bytes_in_hex(session_key)}")
         self.aes = AES(session_key)
@@ -72,6 +76,7 @@ class Peer:
         return encrypted_session_key
 
     def _generate_keys(self):
+        """Generate and cache the public/private RSA key tuples for this peer."""
         self.public_key = (self.rsa.e, self.rsa.n)
         self._private_key = (self.rsa._d, self.rsa.n)
         
@@ -89,4 +94,3 @@ class Peer:
     
         
         
-

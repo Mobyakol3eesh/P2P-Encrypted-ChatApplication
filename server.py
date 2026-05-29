@@ -7,6 +7,7 @@ lock = threading.Lock()
 
 @app.route("/register", methods=["POST"])
 def register():
+    """Register a peer by username and network endpoint."""
     data = request.json
     if data['username'] in peers:
         return jsonify({"status": "error", "message": "Username already taken."}), 400
@@ -19,6 +20,7 @@ def register():
 
 @app.route("/unregister", methods=["POST"])
 def unregister():
+    """Remove a peer registration entry by username."""
     data = request.json
     with lock:
         if data["username"] in peers:
@@ -27,11 +29,13 @@ def unregister():
 
 @app.route("/peers", methods=["GET"])
 def list_peers():
+    """Return the currently registered peer directory."""
     with lock:
         return jsonify(peers)
 
 @app.route("/find/<username>")
 def find(username):
+    """Return network details for a specific username, if registered."""
     with lock:
         return jsonify(peers.get(username, {}))
 

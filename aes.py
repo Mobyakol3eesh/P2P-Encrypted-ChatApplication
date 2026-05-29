@@ -32,6 +32,7 @@ RCON = [
 
 class AES:
     def __init__(self, key: bytes):
+        """Initialize AES context and precompute round keys from the provided key."""
         if len(key) not in [16, 24, 32]:
             raise ValueError("Invalid key length")
         self._key = key
@@ -39,11 +40,13 @@ class AES:
 
     @staticmethod
     def _xtime(a: int) -> int:
+        """Multiply a byte by x in GF(2^8) with AES reduction polynomial."""
         return ((a << 1) ^ 0x1b) & 0xff if a & 0x80 else (a << 1) & 0xff
     
     
     @staticmethod
     def _gf_mul(a: int, b: int) -> int:
+        """Multiply two bytes in GF(2^8)."""
         result = 0
         for _ in range(8):
             if b & 1:
@@ -59,11 +62,13 @@ class AES:
     
     @staticmethod
     def _bytes_to_state(block: bytes):
+        """Map a 16-byte block into AES 4x4 state matrix layout."""
         return [[block[r + 4*c] for c in range(4)] for r in range(4)]
     
     
     @staticmethod
     def _state_to_bytes(state) -> bytes:
+        """Flatten a 4x4 AES state matrix back into a 16-byte block."""
         return bytes(state[r][c] for c in range(4) for r in range(4))
     
     
@@ -72,14 +77,17 @@ class AES:
     # ─────────────────────────────────────────────────────────────
     
     def _sub_bytes(self, state):
+        """Apply SubBytes substitution to each byte in the state."""
         return [[SBOX[state[r][c]] for c in range(4)] for r in range(4)]
     
     
     def _inv_sub_bytes(self, state):
+        """Apply inverse SubBytes substitution to each byte in the state."""
         return [[INV_SBOX[state[r][c]] for c in range(4)] for r in range(4)]
     
     
     def _shift_rows(self, state):
+        """Apply AES ShiftRows transformation to the state."""
         return [
             [state[r][(c + r) % 4] for c in range(4)]
             for r in range(4)
@@ -87,6 +95,7 @@ class AES:
     
     
     def _inv_shift_rows(self, state):
+        """Apply inverse AES ShiftRows transformation to the state."""
         return [
             [state[r][(c - r) % 4] for c in range(4)]
             for r in range(4)
@@ -95,6 +104,7 @@ class AES:
     
     @staticmethod
     def _mix_single_column(col):
+        """Apply AES MixColumns to one state column."""
         a0, a1, a2, a3 = col
         return [
             AES._gf_mul(2, a0) ^ AES._gf_mul(3, a1) ^ a2             ^ a3,
@@ -106,6 +116,7 @@ class AES:
     
     @staticmethod
     def _inv_mix_single_column(col):
+        """Apply inverse AES MixColumns to one state column."""
         a0, a1, a2, a3 = col
         return [
             AES._gf_mul(14,a0)^AES._gf_mul(11,a1)^AES._gf_mul(13,a2)^AES._gf_mul( 9,a3),
@@ -116,12 +127,14 @@ class AES:
     
     
     def _mix_columns(self, state):
+        """Apply MixColumns transformation to all state columns."""
         cols = [[state[r][c] for r in range(4)] for c in range(4)]
         mixed = [self._mix_single_column(col) for col in cols]
         return [[mixed[c][r] for c in range(4)] for r in range(4)]
     
     
     def _inv_mix_columns(self, state):
+        """Apply inverse MixColumns transformation to all state columns."""
         cols = [[state[r][c] for r in range(4)] for c in range(4)]
         mixed = [self._inv_mix_single_column(col) for col in cols]
         return [[mixed[c][r] for c in range(4)] for r in range(4)]
@@ -129,6 +142,7 @@ class AES:
     
     @staticmethod
     def _add_round_key(state, round_key):
+        """XOR the current state with the round key."""
         return [
             [state[r][c] ^ round_key[r][c] for c in range(4)]
             for r in range(4)
@@ -141,6 +155,7 @@ class AES:
     
     @staticmethod
     def _key_expansion(key: bytes):
+        """Expand AES key material into round keys and return round count."""
         key_len = len(key)
         if key_len == 16:
             Nk, Nr = 4, 10
@@ -171,6 +186,7 @@ class AES:
     # ─────────────────────────────────────────────────────────────
     
     def aes_encrypt_block(self, block: bytes) -> bytes:
+        """Encrypt a single 16-byte block using AES rounds."""
         state = self._bytes_to_state(block)
         state = self._add_round_key(state, self._round_keys[0])
         for rnd in range(1, self._nr + 1):
@@ -183,6 +199,7 @@ class AES:
     
     
     def aes_decrypt_block(self, block: bytes) -> bytes:
+        """Decrypt a single 16-byte block using inverse AES rounds."""
         state = self._bytes_to_state(block)
         state = self._add_round_key(state, self._round_keys[self._nr])
         for rnd in range(self._nr - 1, -1, -1):
@@ -200,12 +217,14 @@ class AES:
     
     @staticmethod
     def pkcs7_pad(data: bytes, block_size: int = 16) -> bytes:
+        """Apply PKCS#7 padding to bytes for block-aligned encryption."""
         n = block_size - (len(data) % block_size)
         return data + bytes([n] * n)
     
     
     @staticmethod
     def pkcs7_unpad(data: bytes) -> bytes:
+        """Remove and validate PKCS#7 padding from decrypted bytes."""
         if not data:
             raise ValueError("Empty data cannot be unpadded.")
         n = data[-1]
@@ -221,6 +240,7 @@ class AES:
     # ─────────────────────────────────────────────────────────────
     
     def aes_cbc_encrypt(self, plaintext: bytes, iv: bytes) -> bytes:
+        """Encrypt plaintext bytes using AES in CBC mode."""
         padded = self.pkcs7_pad(plaintext)
         prev = list(iv)
         ciphertext = b''
@@ -234,6 +254,7 @@ class AES:
     
     
     def aes_cbc_decrypt(self, ciphertext: bytes, iv: bytes) -> bytes:
+        """Decrypt AES-CBC ciphertext bytes and remove PKCS#7 padding."""
         prev = list(iv)
         plaintext = b''
         for i in range(0, len(ciphertext), 16):
@@ -251,6 +272,7 @@ class AES:
     
     @staticmethod
     def generate_aes_key(bits: int = 256) -> bytes:
+        """Generate a random AES session key for supported key sizes."""
         if bits not in (128, 256):
             raise ValueError("AES key must be 128 or 256 bits.")
         import os
@@ -259,6 +281,7 @@ class AES:
     
     @staticmethod
     def generate_iv() -> bytes:
+        """Generate a random 16-byte initialization vector."""
         import os
         return os.urandom(16)
     
