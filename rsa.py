@@ -13,7 +13,22 @@ SMALL_PRIMES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29,
 
 class RSA:
     
+    # Build a new RSA keypair from scratch.
+    # Steps:
+    # - Generate two large random primes p and q.
+    # - Compute n = p*q and phi = (p-1)(q-1).
+    # - Ensure e is coprime with phi so it has an inverse.
+    # - Compute private exponent d = e^-1 mod phi.
     def __init__(self, bits=1024, e=65537, miller_rabin_rounds=40): # standard public exponent (e)
+        """
+        Build an RSA keypair from scratch.
+        Steps:
+        1) generate two random large primes p and q,
+        2) compute n = p*q and phi(n) = (p-1)(q-1),
+        3) ensure gcd(e, phi(n)) = 1 so e is invertible mod phi(n),
+        4) compute d = e^(-1) mod phi(n).
+        The pair (e, n) is public and (d, n) is private.
+        """
         self._bits = bits
         self._p = None
         self._q = None
@@ -35,7 +50,15 @@ class RSA:
 
             
         
+    # Determine whether gcd(a, b) equals 1.
+    # Uses the Euclidean algorithm to compute the gcd.
+    # Returns True when a and b are coprime, otherwise False.
     def _is_gcd_1(self, a, b):
+        """
+        Check coprimality using the Euclidean algorithm.
+        Repeatedly apply gcd(a, b) = gcd(b, a mod b) until the remainder is zero.
+        If the final non-zero divisor is 1, then a and b are coprime.
+        """
         a, b = a, b
         while b != 0:
             a, b = b, a % b # Euclidean algorithm where a becomes divisor and b becomes reminder till b (reminder) becomes 0 
@@ -44,15 +67,32 @@ class RSA:
         return False
     
     
+    # Generate a random odd integer with the configured bit length.
+    # Uses SystemRandom for cryptographically-strong randomness.
+    # The range ensures the high bit is set for proper size.
     def _nBitRandom(self): 
+        """
+        Generate a random odd-range integer with roughly _bits bits.
+        SystemRandom uses OS entropy, which is appropriate for key generation.
+        The numeric interval is chosen to keep candidates in the high bit-length range.
+        """
   
         return(random.SystemRandom().randrange(2**(self._bits-1)+1, 2**self._bits-1))
      
 
     
+    # Generate a probable prime candidate.
+    # Steps:
+    # - Draw a random odd candidate.
+    # - Trial-divide by small primes to reject trivial composites.
+    # - Run Miller-Rabin rounds to probabilistically verify primality.
     def _prime_generation(self, miller_rabin_rounds=40):
-        '''Generate a prime candidate divisible 
-        by first primes'''
+        """
+        Generate a probable prime in two phases:
+        1) quick trial division against small primes to reject obvious composites,
+        2) probabilistic Miller-Rabin rounds for strong compositeness detection.
+        This hybrid approach is much faster than running Miller-Rabin on every candidate.
+        """
         while True:
         # Obtain a random number
             candidate_prime = self._nBitRandom()
@@ -69,11 +109,17 @@ class RSA:
                 
              
     
+    # Perform the Miller-Rabin primality test.
+    # Decomposes n-1 into 2^t * s and tests random bases.
+    # Returns True if candidate is probably prime.
     def miller_rabin_test(self, candidate_prime, k=40):
-        """Miller-Rabin primality test.
-            candidate_prime : number to test
-            k : number of rounds
-            """
+        """
+        Probabilistic primality test based on modular arithmetic witnesses.
+        Write candidate_prime - 1 as (2^t) * s with s odd, then test random bases a.
+        If a^s mod n is neither 1 nor -1, repeated squaring should eventually hit -1
+        for primes; failing that indicates compositeness.
+        Passing k rounds means "probably prime" with very low error probability.
+        """
         s = candidate_prime - 1
         t = 0
         while s % 2 == 0:
@@ -96,8 +142,16 @@ class RSA:
         return True
     
     
+    # Compute modular exponentiation efficiently.
+    # Uses square-and-multiply to reduce complexity to O(log exponent).
+    # Returns (base^exponent) mod mod.
     def _modular_exponentiation(self, base, exponent, mod):
-        """Efficiently compute (base^exponent) % mod. Using Fast Modular Exponentiation by Squaring."""
+        """
+        Compute (base^exponent) mod mod via square-and-multiply.
+        Instead of multiplying base exponent times, process exponent bits:
+        each step squares the current value, and multiplies by base only for '1' bits.
+        This reduces complexity from O(exponent) multiplications to O(log exponent).
+        """
         result = base
         bit_string = bin(exponent)[2:]  
         for bit in bit_string[1:]:  # Skip the most significant bit
@@ -106,8 +160,15 @@ class RSA:
                 result = (result * base) % mod
         return result
 
+    # Compute modular inverse of a modulo b.
+    # Uses Extended Euclidean Algorithm to find x where a*x ≡ 1 (mod b).
+    # Returns a positive inverse in the range [0, b).
     def inv_mod(self, a, b):
-        """Compute modular inverse of a mod m using Extended Euclidean Algorithm."""
+        """
+        Compute modular inverse using Extended Euclidean Algorithm.
+        The algorithm finds coefficients x,y such that a*x + b*y = gcd(a,b).
+        When gcd(a,b)=1, x is the inverse of a modulo b, so a*x ≡ 1 (mod b).
+        """
         x0, x1 = 1, 0 
         orig_b = b
         while b:
@@ -119,8 +180,15 @@ class RSA:
         inv = x0 % orig_b  # as x0 can be negative, we take it modulo orig_b to ensure it's positive
         return inv
     
+    # Encrypt plaintext bytes with RSA: c = m^e mod n.
+    # Converts plaintext to an integer, validates m < n, and exponentiates.
+    # Returns ciphertext bytes suitable for transmission.
     def encrypt(self, plaintext : bytes, e,n) -> bytes:
-        """Encrypt plaintext using the public key (n, e)."""
+        """
+        Perform textbook RSA encryption: c = m^e mod n.
+        The plaintext bytes are interpreted as a big-endian integer m.
+        Validity requires m < n; otherwise modular reduction would corrupt data.
+        """
         if plaintext == 0:
             return b'\x00'
         plaintext_int = Encoder.int_from_bytes(plaintext)
@@ -130,8 +198,15 @@ class RSA:
         ciphertext_bytes = Encoder.int_in_bytes(ciphertext_int)
         return ciphertext_bytes
     
+    # Decrypt ciphertext bytes with RSA: m = c^d mod n.
+    # Converts ciphertext to an integer, exponentiates with d, and returns bytes.
+    # This recovers the original plaintext when keys are valid.
     def decrypt(self, ciphertext_bytes: bytes, d: int, n: int) -> bytes:
-        """Decrypt ciphertext using the private key (n, d)."""
+        """
+        Perform textbook RSA decryption: m = c^d mod n.
+        By RSA arithmetic, (m^e)^d mod n recovers m when keys are valid.
+        The result integer is converted back to bytes for application use.
+        """
         ciphertext_int = Encoder.int_from_bytes(ciphertext_bytes)
         plaintext_int = self._modular_exponentiation(ciphertext_int, d, n)
         plaintext_bytes = Encoder.int_in_bytes(plaintext_int)
