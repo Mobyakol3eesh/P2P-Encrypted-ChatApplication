@@ -1,4 +1,7 @@
 
+# AES S-Box used for SubBytes to introduce non-linearity in each round.
+# Indexed by byte value (0-255) to produce the substituted byte.
+# This table is fixed by the AES specification.
 SBOX = [
     0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,
     0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,
@@ -18,12 +21,14 @@ SBOX = [
     0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16,
 ]
 
-# AES Inverse S-Box
+# AES inverse S-Box for reversing SubBytes during decryption.
+# Built once by inverting the forward S-Box mapping.
 INV_SBOX = [0] * 256
 for i, v in enumerate(SBOX):
     INV_SBOX[v] = i
 
-# Round constants (Rcon) for key schedule
+# Round constants (Rcon) used in the AES key schedule.
+# Each entry is XORed into the expanded key to break symmetry.
 RCON = [
     0x00,0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x1b,0x36,
     0x6c,0xd8,0xab,0x4d,0x9a,0x2f,0x5e,0xbc,0x63,0xc6,0x97,
@@ -31,43 +36,31 @@ RCON = [
 ]
 
 class AES:
+    # AES block cipher implementation with key expansion and CBC helpers.
+    # Operates on 16-byte blocks and supports 128/192/256-bit keys.
+    # Round keys are precomputed for faster repeated encryption/decryption.
     # Initialize AES with a raw key.
     # Validates key length (128/192/256-bit) and builds round keys.
     # Precomputed round keys speed up both encryption and decryption.
     def __init__(self, key: bytes):
-        """
-        Initialize AES with a raw key and precompute the key schedule.
-        AES is a substitution-permutation network operating on 16-byte blocks.
-        Precomputing round keys once speeds up both encryption and decryption.
-        """
         if len(key) not in [16, 24, 32]:
             raise ValueError("Invalid key length")
         self._key = key
         self._round_keys, self._nr = self._key_expansion(key)
 
-    @staticmethod
     # Multiply a byte by x (02) in GF(2^8).
     # Uses the AES reduction polynomial when the high bit overflows.
     # This is a helper for MixColumns multiplication.
+    @staticmethod
     def _xtime(a: int) -> int:
-        """
-        Multiply a byte by x (i.e., by 2) in GF(2^8).
-        Left shift performs polynomial multiplication by x; if overflow occurs,
-        reduce modulo AES irreducible polynomial x^8 + x^4 + x^3 + x + 1 (0x11b).
-        """
         return ((a << 1) ^ 0x1b) & 0xff if a & 0x80 else (a << 1) & 0xff
     
     
-    @staticmethod
     # Multiply two bytes in GF(2^8).
     # Implements the "Russian peasant" method with conditional XOR.
     # Used by MixColumns and its inverse.
+    @staticmethod
     def _gf_mul(a: int, b: int) -> int:
-        """
-        Multiply two field elements in GF(2^8) using Russian-peasant multiplication.
-        Repeatedly conditionally XOR the running multiplicand into the result
-        based on bits of b, while advancing multiplicand with _xtime reduction.
-        """
         result = 0
         for _ in range(8):
             if b & 1:
@@ -81,27 +74,19 @@ class AES:
     # 3. STATE HELPERS  (AES operates on a 4×4 byte matrix)
     # ─────────────────────────────────────────────────────────────
     
-    @staticmethod
     # Convert a 16-byte block into a 4x4 AES state matrix.
     # AES uses column-major order, so bytes are mapped by column first.
     # This structure enables row/column transformations.
+    @staticmethod
     def _bytes_to_state(block: bytes):
-        """
-        Convert linear bytes into AES state matrix (4 rows x 4 columns).
-        AES defines state in column-major order; index mapping preserves that layout.
-        """
         return [[block[r + 4*c] for c in range(4)] for r in range(4)]
     
     
-    @staticmethod
     # Convert a 4x4 AES state matrix back to bytes.
     # This reverses the column-major mapping from _bytes_to_state.
     # Returns a linear 16-byte block.
+    @staticmethod
     def _state_to_bytes(state) -> bytes:
-        """
-        Convert the 4x4 AES state back to linear bytes in column-major order.
-        This is the inverse mapping of _bytes_to_state.
-        """
         return bytes(state[r][c] for c in range(4) for r in range(4))
     
     
@@ -113,10 +98,6 @@ class AES:
     # Provides non-linearity (confusion) in the cipher.
     # Applied every round during encryption.
     def _sub_bytes(self, state):
-        """
-        Apply the nonlinear S-box substitution to each state byte.
-        This introduces confusion: output bits become nonlinear functions of input bits.
-        """
         return [[SBOX[state[r][c]] for c in range(4)] for r in range(4)]
     
     
@@ -124,9 +105,6 @@ class AES:
     # This reverses the SubBytes step during decryption.
     # Restores the original byte values before substitution.
     def _inv_sub_bytes(self, state):
-        """
-        Reverse SubBytes by applying inverse S-box lookup bytewise.
-        """
         return [[INV_SBOX[state[r][c]] for c in range(4)] for r in range(4)]
     
     
@@ -134,11 +112,6 @@ class AES:
     # This permutes bytes across columns to aid diffusion.
     # Combined with MixColumns to spread byte influence.
     def _shift_rows(self, state):
-        """
-        Rotate row r left by r positions.
-        This permutes byte positions across columns and enables diffusion
-        when combined with MixColumns.
-        """
         return [
             [state[r][(c + r) % 4] for c in range(4)]
             for r in range(4)
@@ -149,25 +122,17 @@ class AES:
     # Reverses the ShiftRows permutation during decryption.
     # Restores original row alignment.
     def _inv_shift_rows(self, state):
-        """
-        Reverse ShiftRows by rotating row r right by r positions.
-        """
         return [
             [state[r][(c - r) % 4] for c in range(4)]
             for r in range(4)
         ]
     
     
-    @staticmethod
     # Mix one column using AES fixed polynomial multiplication.
     # Produces each output byte as a linear combination of input bytes.
     # Spreads input influence across the entire column.
+    @staticmethod
     def _mix_single_column(col):
-        """
-        Mix one column by multiplying it with a fixed matrix over GF(2^8).
-        This is a linear transform that spreads each input byte influence
-        across all 4 output bytes (intra-column diffusion).
-        """
         a0, a1, a2, a3 = col
         return [
             AES._gf_mul(2, a0) ^ AES._gf_mul(3, a1) ^ a2             ^ a3,
@@ -177,15 +142,11 @@ class AES:
         ]
     
     
-    @staticmethod
     # Apply the inverse MixColumns transform on one column.
     # Uses the inverse matrix constants (14,11,13,9).
     # Reverses the diffusion introduced during encryption.
+    @staticmethod
     def _inv_mix_single_column(col):
-        """
-        Apply inverse MixColumns matrix multiplication over GF(2^8).
-        The constants (14,11,13,9) are entries of the inverse matrix.
-        """
         a0, a1, a2, a3 = col
         return [
             AES._gf_mul(14,a0)^AES._gf_mul(11,a1)^AES._gf_mul(13,a2)^AES._gf_mul( 9,a3),
@@ -195,39 +156,29 @@ class AES:
         ]
     
     
+    # Apply MixColumns to all four columns of the state.
+    # Performs per-column multiplication over GF(2^8).
+    # This provides diffusion across bytes in each column.
     def _mix_columns(self, state):
-        # Apply MixColumns to all four columns of the state.
-        # Performs per-column multiplication over GF(2^8).
-        # This provides diffusion across bytes in each column.
-        """
-        Apply _mix_single_column independently to each of the 4 state columns.
-        """
         cols = [[state[r][c] for r in range(4)] for c in range(4)]
         mixed = [self._mix_single_column(col) for col in cols]
         return [[mixed[c][r] for c in range(4)] for r in range(4)]
     
     
+    # Apply inverse MixColumns to all columns.
+    # Reverses the linear mixing performed during encryption.
+    # Used in each decryption round except the last.
     def _inv_mix_columns(self, state):
-        # Apply inverse MixColumns to all columns.
-        # Reverses the linear mixing performed during encryption.
-        # Used in each decryption round except the last.
-        """
-        Apply inverse MixColumns independently to each of the 4 state columns.
-        """
         cols = [[state[r][c] for r in range(4)] for c in range(4)]
         mixed = [self._inv_mix_single_column(col) for col in cols]
         return [[mixed[c][r] for c in range(4)] for r in range(4)]
     
     
-    @staticmethod
     # XOR the state with a round key matrix.
     # This is the AddRoundKey step; XOR is its own inverse.
     # Applied at the start and end of every round.
+    @staticmethod
     def _add_round_key(state, round_key):
-        """
-        Combine state with round key using XOR.
-        In GF(2), XOR is both addition and subtraction, so this step is self-inverse.
-        """
         return [
             [state[r][c] ^ round_key[r][c] for c in range(4)]
             for r in range(4)
@@ -238,17 +189,11 @@ class AES:
     # 5. KEY EXPANSION (KEY SCHEDULE)
     # ─────────────────────────────────────────────────────────────
     
-    @staticmethod
     # Expand the cipher key into round keys.
     # Applies RotWord/SubWord/Rcon to introduce non-linearity.
     # Returns the list of round key matrices and round count.
+    @staticmethod
     def _key_expansion(key: bytes):
-        """
-        Expand the cipher key into round keys via AES key schedule recurrence.
-        Core operations (RotWord, SubWord, Rcon XOR) introduce nonlinearity and
-        round asymmetry so each round key is distinct but deterministically derived.
-        Returns round key matrices and total round count Nr.
-        """
         key_len = len(key)
         if key_len == 16:
             Nk, Nr = 4, 10
@@ -278,15 +223,10 @@ class AES:
     # 6. AES BLOCK CIPHER  (single 16-byte block)
     # ─────────────────────────────────────────────────────────────
     
+    # Encrypt a single 16-byte block using the AES round structure.
+    # Steps: AddRoundKey, then (SubBytes, ShiftRows, MixColumns, AddRoundKey)
+    # for each round, with the final round omitting MixColumns.
     def aes_encrypt_block(self, block: bytes) -> bytes:
-        # Encrypt a single 16-byte block.
-        # Steps: AddRoundKey, then (SubBytes, ShiftRows, MixColumns, AddRoundKey)
-        # for each round, with the final round omitting MixColumns.
-        """
-        Encrypt one 16-byte block following AES round structure:
-        initial AddRoundKey, then Nr-1 full rounds (SubBytes, ShiftRows, MixColumns,
-        AddRoundKey), and final round without MixColumns.
-        """
         state = self._bytes_to_state(block)
         state = self._add_round_key(state, self._round_keys[0])
         for rnd in range(1, self._nr + 1):
@@ -298,14 +238,10 @@ class AES:
         return self._state_to_bytes(state)
     
     
+    # Decrypt a single 16-byte block by reversing the AES rounds.
+    # Applies inverse ShiftRows/SubBytes and inverse MixColumns in reverse order.
+    # Uses round keys in reverse, starting from the last AddRoundKey.
     def aes_decrypt_block(self, block: bytes) -> bytes:
-        # Decrypt a single 16-byte block.
-        # Steps reverse encryption: AddRoundKey with last key, then
-        # inverse ShiftRows/SubBytes, AddRoundKey, and inverse MixColumns.
-        """
-        Decrypt one 16-byte block using inverse AES transformations in reverse order.
-        Round order mirrors encryption with inverse operations and reverse key order.
-        """
         state = self._bytes_to_state(block)
         state = self._add_round_key(state, self._round_keys[self._nr])
         for rnd in range(self._nr - 1, -1, -1):
@@ -321,28 +257,20 @@ class AES:
     # 7. PKCS#7 PADDING
     # ─────────────────────────────────────────────────────────────
     
-    @staticmethod
     # Apply PKCS#7 padding to reach a full block boundary.
     # Pads with N bytes of value N, where N is the missing length.
     # Ensures CBC encryption processes full blocks.
+    @staticmethod
     def pkcs7_pad(data: bytes, block_size: int = 16) -> bytes:
-        """
-        Add PKCS#7 padding so length becomes a multiple of block_size.
-        If k bytes are needed, append k copies of value k.
-        """
         n = block_size - (len(data) % block_size)
         return data + bytes([n] * n)
     
     
-    @staticmethod
     # Remove and validate PKCS#7 padding.
     # Verifies the final byte count and checks all padding bytes.
     # Raises errors if padding is malformed.
+    @staticmethod
     def pkcs7_unpad(data: bytes) -> bytes:
-        """
-        Validate and remove PKCS#7 padding.
-        Strict checks prevent malformed padding from being silently accepted.
-        """
         if not data:
             raise ValueError("Empty data cannot be unpadded.")
         n = data[-1]
@@ -357,15 +285,10 @@ class AES:
     # 8. CBC MODE  (Cipher Block Chaining)
     # ─────────────────────────────────────────────────────────────
     
+    # Encrypt data using CBC mode with PKCS#7 padding.
+    # XOR each plaintext block with the previous ciphertext (or IV),
+    # then encrypt with the block cipher to produce the next ciphertext block.
     def aes_cbc_encrypt(self, plaintext: bytes, iv: bytes) -> bytes:
-        # Encrypt data using CBC mode.
-        # XOR each plaintext block with the previous ciphertext (or IV),
-        # then encrypt with the block cipher to produce the next ciphertext block.
-        """
-        Encrypt using CBC mode: C_i = E_K(P_i XOR C_{i-1}), with C_0 = IV.
-        Chaining ensures identical plaintext blocks encrypt differently if previous
-        ciphertext differs, improving semantic security over ECB.
-        """
         padded = self.pkcs7_pad(plaintext)
         prev = list(iv)
         ciphertext = b''
@@ -378,14 +301,10 @@ class AES:
         return ciphertext
     
     
+    # Decrypt CBC ciphertext and remove PKCS#7 padding.
+    # Decrypt each block, XOR with the previous ciphertext (or IV),
+    # then strip padding to recover the original plaintext.
     def aes_cbc_decrypt(self, ciphertext: bytes, iv: bytes) -> bytes:
-        # Decrypt data using CBC mode.
-        # Decrypt each block, XOR with the previous ciphertext (or IV),
-        # then remove PKCS#7 padding to recover the original plaintext.
-        """
-        Decrypt CBC blocks via P_i = D_K(C_i) XOR C_{i-1}, with C_0 = IV.
-        After block processing, remove PKCS#7 padding to recover original plaintext.
-        """
         prev = list(iv)
         plaintext = b''
         for i in range(0, len(ciphertext), 16):
@@ -401,29 +320,22 @@ class AES:
     # 9. SESSION KEY GENERATION
     # ─────────────────────────────────────────────────────────────
     
-    @staticmethod
     # Generate a random AES key of the requested size.
     # Uses OS randomness (urandom) for cryptographic quality.
     # Supports 128-bit and 256-bit keys.
+    @staticmethod
     def generate_aes_key(bits: int = 256) -> bytes:
-        """
-        Generate a random AES key from OS entropy for 128- or 256-bit security.
-        """
         if bits not in (128, 256):
             raise ValueError("AES key must be 128 or 256 bits.")
         import os
         return os.urandom(bits // 8)
     
     
-    @staticmethod
     # Generate a random 16-byte IV for CBC mode.
     # Each encryption should use a fresh, unpredictable IV.
     # IV size matches the AES block size (16 bytes).
+    @staticmethod
     def generate_iv() -> bytes:
-        """
-        Generate a random 16-byte IV (one AES block).
-        In CBC mode, IV uniqueness/unpredictability is required for security.
-        """
         import os
         return os.urandom(16)
     
