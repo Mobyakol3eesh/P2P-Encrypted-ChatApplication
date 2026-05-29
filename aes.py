@@ -135,4 +135,130 @@ class AES:
         ]
     
     
- 
+    # ─────────────────────────────────────────────────────────────
+    # 5. KEY EXPANSION (KEY SCHEDULE)
+    # ─────────────────────────────────────────────────────────────
+    
+    @staticmethod
+    def _key_expansion(key: bytes):
+        key_len = len(key)
+        if key_len == 16:
+            Nk, Nr = 4, 10
+        elif key_len == 32:
+            Nk, Nr = 8, 14
+        else:
+            raise ValueError("Key must be 16 or 32 bytes for AES-128 or AES-256.")
+        W = [list(key[4*i:4*i+4]) for i in range(Nk)]
+        for i in range(Nk, 4 * (Nr + 1)):
+            temp = W[i - 1][:]
+            if i % Nk == 0:
+                temp = temp[1:] + temp[:1]
+                temp = [SBOX[b] for b in temp]
+                temp[0] ^= RCON[i // Nk]
+            elif Nk > 6 and i % Nk == 4:
+                temp = [SBOX[b] for b in temp]
+            W.append([W[i - Nk][j] ^ temp[j] for j in range(4)])
+        round_keys = []
+        for rnd in range(Nr + 1):
+            rk_words = W[4*rnd: 4*rnd + 4]
+            state = [[rk_words[c][r] for c in range(4)] for r in range(4)]
+            round_keys.append(state)
+        return round_keys, Nr
+    
+    
+    # ─────────────────────────────────────────────────────────────
+    # 6. AES BLOCK CIPHER  (single 16-byte block)
+    # ─────────────────────────────────────────────────────────────
+    
+    def aes_encrypt_block(self, block: bytes) -> bytes:
+        state = self._bytes_to_state(block)
+        state = self._add_round_key(state, self._round_keys[0])
+        for rnd in range(1, self._nr + 1):
+            state = self._sub_bytes(state)
+            state = self._shift_rows(state)
+            if rnd < self._nr:
+                state = self._mix_columns(state)
+            state = self._add_round_key(state, self._round_keys[rnd])
+        return self._state_to_bytes(state)
+    
+    
+    def aes_decrypt_block(self, block: bytes) -> bytes:
+        state = self._bytes_to_state(block)
+        state = self._add_round_key(state, self._round_keys[self._nr])
+        for rnd in range(self._nr - 1, -1, -1):
+            state = self._inv_shift_rows(state)
+            state = self._inv_sub_bytes(state)
+            state = self._add_round_key(state, self._round_keys[rnd])
+            if rnd > 0:
+                state = self._inv_mix_columns(state)
+        return self._state_to_bytes(state)
+    
+    
+    # ─────────────────────────────────────────────────────────────
+    # 7. PKCS#7 PADDING
+    # ─────────────────────────────────────────────────────────────
+    
+    @staticmethod
+    def pkcs7_pad(data: bytes, block_size: int = 16) -> bytes:
+        n = block_size - (len(data) % block_size)
+        return data + bytes([n] * n)
+    
+    
+    @staticmethod
+    def pkcs7_unpad(data: bytes) -> bytes:
+        if not data:
+            raise ValueError("Empty data cannot be unpadded.")
+        n = data[-1]
+        if n == 0 or n > 16:
+            raise ValueError("Invalid PKCS#7 padding byte.")
+        if data[-n:] != bytes([n] * n):
+            raise ValueError("Invalid PKCS#7 padding.")
+        return data[:-n]
+    
+    
+    # ─────────────────────────────────────────────────────────────
+    # 8. CBC MODE  (Cipher Block Chaining)
+    # ─────────────────────────────────────────────────────────────
+    
+    def aes_cbc_encrypt(self, plaintext: bytes, iv: bytes) -> bytes:
+        padded = self.pkcs7_pad(plaintext)
+        prev = list(iv)
+        ciphertext = b''
+        for i in range(0, len(padded), 16):
+            block = list(padded[i:i+16])
+            xored = bytes([block[j] ^ prev[j] for j in range(16)])
+            enc_block = self.aes_encrypt_block(xored)
+            ciphertext += enc_block
+            prev = list(enc_block)
+        return ciphertext
+    
+    
+    def aes_cbc_decrypt(self, ciphertext: bytes, iv: bytes) -> bytes:
+        prev = list(iv)
+        plaintext = b''
+        for i in range(0, len(ciphertext), 16):
+            block = ciphertext[i:i+16]
+            dec_block = list(self.aes_decrypt_block(block))
+            xored = bytes([dec_block[j] ^ prev[j] for j in range(16)])
+            plaintext += xored
+            prev = list(block)
+        return self.pkcs7_unpad(plaintext)
+    
+    
+    # ─────────────────────────────────────────────────────────────
+    # 9. SESSION KEY GENERATION
+    # ─────────────────────────────────────────────────────────────
+    
+    @staticmethod
+    def generate_aes_key(bits: int = 256) -> bytes:
+        if bits not in (128, 256):
+            raise ValueError("AES key must be 128 or 256 bits.")
+        import os
+        return os.urandom(bits // 8)
+    
+    
+    @staticmethod
+    def generate_iv() -> bytes:
+        import os
+        return os.urandom(16)
+    
