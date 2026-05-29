@@ -10,11 +10,13 @@ from aes import AES
 
 
 class Peer:
+    # Represents a local peer with cryptographic keys and connection state.
+    # Owns RSA/AES helpers and keeps track of active sockets and groups.
+    # Provides convenience methods for encrypting/decrypting session data.
     # Create a peer object that owns keys and connection state.
     # Initializes RSA helper, connection dictionaries, and debug mode.
     # Generates RSA keypair immediately so the peer can handshake with others.
     def __init__(self, username, port, encoder,debug):
-        """Initialize peer state, cryptographic helpers, and key material."""
         self.username = username
         self.port = port
         self.public_key = None
@@ -38,7 +40,6 @@ class Peer:
     # The AES instance is recreated so it always matches the active session key.
     # Debug mode prints the key in hex for inspection.
     def init_aes(self, session_key: bytes):
-        """Initialize the AES helper instance with a provided session key."""
         if self.debug:
             print(f"Initializing AES with session key: {Encoder.represent_bytes_in_hex(session_key)}")
         self.aes = AES(session_key)
@@ -49,7 +50,6 @@ class Peer:
     # - Encrypt the plaintext with the supplied IV.
     # - Return ciphertext bytes for transmission.
     def encrypt_message(self, plaintext: bytes,session_key: bytes,iv: bytes) -> bytes:
-        """Encrypt plaintext bytes with AES-CBC using the given key and IV."""
         if self.debug:
             print(f"Encrypting message (hex) {self.encoder.decode(plaintext)} with session key: {Encoder.represent_bytes_in_hex(session_key)}")   
         self.aes = AES(session_key)
@@ -65,7 +65,6 @@ class Peer:
     # - Decrypt ciphertext with the supplied IV.
     # - Return plaintext bytes for higher-level parsing.
     def decrypt_message(self, ciphertext: bytes, session_key: bytes, iv: bytes):
-        """Decrypt AES-CBC ciphertext bytes using the provided key and IV."""
         if self.debug:
             print(f"Decrypting message (hex) {Encoder.represent_bytes_in_hex(ciphertext)} with session key: {Encoder.represent_bytes_in_hex(session_key)}")
         self.aes = AES(session_key)
@@ -78,18 +77,17 @@ class Peer:
     # Uses the peer's private key (d, n) to recover the raw key bytes.
     # Returns the session key ready for AES initialization.
     def decrypt_session_key(self, ciphertext : bytes):
-        """Decrypt the session key using the peer's private key."""
         if self.debug:
             print(f"Decrypting session key {Encoder.represent_bytes_in_hex(ciphertext)} with private key (d,n)=({self._private_key[0]}, {self._private_key[1]})")
         decrypted_session_key = self.rsa.decrypt(ciphertext, self._private_key[0], self._private_key[1])
         if self.debug:
             print(f"Decrypted session key (hex): {Encoder.represent_bytes_in_hex(decrypted_session_key)}")
         return decrypted_session_key
+
     # Encrypt a session key for another peer.
     # Uses the recipient's public key (e, n) so only they can decrypt.
     # Returns ciphertext bytes to send in the handshake.
     def encrypt_session_key(self, session_key : bytes, recipient_public_key: int, recipient_n: int):
-        """Encrypt the session key using the recipient's public key."""
         if self.debug:
             print(f"Encrypting session key {Encoder.represent_bytes_in_hex(session_key)} for recipient with public key (e,n)=({recipient_public_key}, {recipient_n})")
         encrypted_session_key = self.rsa.encrypt(session_key, recipient_public_key, recipient_n)
@@ -101,7 +99,6 @@ class Peer:
     # Public key is (e, n) and private key is (d, n).
     # These are cached on the Peer for handshakes and decryption.
     def _generate_keys(self):
-        """Generate and cache the public/private RSA key tuples for this peer."""
         self.public_key = (self.rsa.e, self.rsa.n)
         self._private_key = (self.rsa._d, self.rsa.n)
         
